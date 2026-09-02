@@ -1,1 +1,7 @@
 prototypes
+__pycache__/
+*.pyc
+.venv/
+frontend/node_modules/
+frontend/dist/
+.pytest_cache/
