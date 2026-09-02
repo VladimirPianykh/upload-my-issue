@@ -14,6 +14,7 @@ export default function DownloadScreen({ currentRepo, onOperationStateChange }) 
   const [sort, setSort] = useState("created");
   const [direction, setDirection] = useState("desc");
   const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
   const [labelFilter, setLabelFilter] = useState("");
   const [repoLabels, setRepoLabels] = useState([]);
   const [selected, setSelected] = useState(new Set());
@@ -25,8 +26,15 @@ export default function DownloadScreen({ currentRepo, onOperationStateChange }) 
   const [defaultFolder, setDefaultFolder] = useState(null);
   const [bulkJob, setBulkJob] = useState(null);
 
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  const loadIdRef = useRef(0);
   const load = useCallback(async () => {
     if (!currentRepo) return;
+    const loadId = ++loadIdRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -38,14 +46,16 @@ export default function DownloadScreen({ currentRepo, onOperationStateChange }) 
         direction,
         search: search.trim() || null,
       });
+      if (loadIdRef.current !== loadId) return; // пришёл устаревший ответ - игнорируем
       setIssues(result.issues);
       for (const i of result.issues) {
         selectedIssuesRef.current.set(i.number, { number: i.number, title: i.title, body: i.body });
       }
     } catch (err) {
+      if (loadIdRef.current !== loadId) return;
       setError(err?.message || String(err));
     } finally {
-      setLoading(false);
+      if (loadIdRef.current === loadId) setLoading(false);
     }
   }, [currentRepo, page, state, sort, direction, search, labelFilter]);
 
@@ -184,7 +194,7 @@ export default function DownloadScreen({ currentRepo, onOperationStateChange }) 
           <option value="">Все labels</option>
           {repoLabels.map((l) => <option key={l.name} value={l.name}>{l.name}</option>)}
         </select>
-        <input type="text" placeholder="Поиск по title..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        <input type="text" placeholder="Поиск по title..." value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
         <button className="btn" onClick={forceRefresh}>Обновить</button>
         <div style={{ flex: 1 }} />
         <button className="btn btn-primary" disabled={selected.size === 0 || !!bulkJob} onClick={bulkDownload}>
