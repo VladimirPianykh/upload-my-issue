@@ -115,6 +115,10 @@ export default function DownloadScreen({ currentRepo, onOperationStateChange }) 
   };
 
   useEffect(() => {
+    // Централизованный сигнал: бэкенд шлёт issues-changed при любом
+    // действии, инвалидирующем кэш issues (смена репо, refresh, успешный
+    // upload и т.п.), а не только при явном нажатии "Обновить".
+    const offIssuesChanged = onBackendEvent("issues-changed", () => { load(); });
     const off1 = onBackendEvent("download-progress", ({ job_id, done, total }) => {
       setBulkJob((prev) => (prev && prev.jobId === job_id ? { ...prev, done, total } : prev));
     });
@@ -130,8 +134,8 @@ export default function DownloadScreen({ currentRepo, onOperationStateChange }) 
         setError(`Скачано: ${saved.length}. Ошибок: ${errors.length}`);
       }
     });
-    return () => { off1(); off2(); };
-  }, [onOperationStateChange]);
+    return () => { offIssuesChanged(); off1(); off2(); };
+  }, [onOperationStateChange, load]);
 
   const cancelBulk = async () => {
     if (bulkJob) await api.cancelJob(bulkJob.jobId);

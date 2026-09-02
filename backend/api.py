@@ -143,7 +143,7 @@ class Api:
             raise GitHubApiError(f"Репозиторий недоступен: {exc}") from exc
         self._current_repo = summary.full_name
         self._settings.update(last_repo_full_name=summary.full_name)
-        self._issues_page_cache.clear()
+        self._invalidate_issues_cache()
         return asdict(summary)
 
     def select_repository_by_url(self, url: str) -> dict:
@@ -196,7 +196,15 @@ class Api:
         }
 
     def refresh_issues_cache(self) -> None:
+        self._invalidate_issues_cache()
+
+    def _invalidate_issues_cache(self) -> None:
+        """Единая точка сброса кэша списка issues. Вызывается при любом
+        действии, способном изменить набор issues в репозитории (смена репо,
+        ручной refresh, успешная отправка upload'а и т.д.), и уведомляет
+        фронтенд, чтобы открытые экраны могли перезагрузить список сами."""
         self._issues_page_cache.clear()
+        self._emit("issues-changed", {})
 
     # -- Раздел 5: Download - сохранение файлов ------------------------------
 
@@ -450,6 +458,8 @@ class Api:
                 self._operation_in_progress = False
                 if not self._upload_queue:
                     pass  # раздел 6: очередь очищается только после подтверждённой полностью успешной отправки
+                if succeeded_ids:
+                    self._invalidate_issues_cache()
                 self._emit(
                     "upload-done",
                     {
