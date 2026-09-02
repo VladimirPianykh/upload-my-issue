@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, onBackendEvent } from "../api";
 import { useDialog } from "../dialogs/DialogProvider";
 import IssueCard from "./IssueCard";
@@ -17,6 +17,10 @@ export default function DownloadScreen({ currentRepo, onOperationStateChange }) 
   const [labelFilter, setLabelFilter] = useState("");
   const [repoLabels, setRepoLabels] = useState([]);
   const [selected, setSelected] = useState(new Set());
+  // Данные выбранных issues по всем страницам, не только текущей: `issues`
+  // содержит лишь одну страницу, поэтому для скачивания нельзя опираться
+  // на фильтр по нему - нужно копить title/body по мере посещения страниц.
+  const selectedIssuesRef = useRef(new Map());
   const [downloadStates, setDownloadStates] = useState({});
   const [defaultFolder, setDefaultFolder] = useState(null);
   const [bulkJob, setBulkJob] = useState(null);
@@ -35,6 +39,9 @@ export default function DownloadScreen({ currentRepo, onOperationStateChange }) 
         search: search.trim() || null,
       });
       setIssues(result.issues);
+      for (const i of result.issues) {
+        selectedIssuesRef.current.set(i.number, { number: i.number, title: i.title, body: i.body });
+      }
     } catch (err) {
       setError(err?.message || String(err));
     } finally {
@@ -47,6 +54,7 @@ export default function DownloadScreen({ currentRepo, onOperationStateChange }) 
   useEffect(() => {
     setPage(1);
     setSelected(new Set());
+    selectedIssuesRef.current.clear();
   }, [currentRepo, state, sort, direction, search, labelFilter]);
 
   useEffect(() => {
@@ -103,11 +111,15 @@ export default function DownloadScreen({ currentRepo, onOperationStateChange }) 
   const bulkDownload = async () => {
     const ids = [...selected];
     if (ids.length === 0) return;
+    const items = ids
+      .map((n) => selectedIssuesRef.current.get(n))
+      .filter(Boolean);
+    if (items.length === 0) {
+      setError("Не удалось найти данные выбранных issues, попробуйте выбрать заново");
+      return;
+    }
     const folder = await ensureFolder();
     if (!folder) return;
-    const items = issues.filter((i) => ids.includes(i.number)).map((i) => ({
-      number: i.number, title: i.title, body: i.body,
-    }));
     ids.forEach((n) => setDownloadStates((s) => ({ ...s, [n]: "downloading" })));
     onOperationStateChange?.(true);
     const jobId = await api.bulkDownload(folder, items);
