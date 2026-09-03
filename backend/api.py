@@ -12,6 +12,7 @@ Promise.
 """
 from __future__ import annotations
 
+import functools
 import os
 import threading
 import uuid
@@ -22,6 +23,7 @@ import webbrowser
 
 import webview
 
+from error_log import GENERIC_MESSAGE, log_unexpected_error
 from filename_utils import build_download_filename
 from github_client import GitHubAuthError, GitHubClient, GitHubApiError
 from settings_store import SettingsStore
@@ -40,7 +42,40 @@ class OperationInProgressError(RuntimeError):
     pass
 
 
-class Api:
+def _wrap_unexpected_errors(name, method):
+    """Оборачивает публичный метод API: уже смоделированные доменные ошибки
+    (наследники RuntimeError/ValueError - GitHubApiError, InvalidRepoUrlError,
+    MarkdownReadError и т.п.) пробрасываются как есть с их собственным
+    понятным сообщением. Всё остальное - непредвиденная ошибка (раздел 2
+    overview): логируется с traceback и наружу в UI уходит только safe
+    обобщённое сообщение, без деталей стека/внутренностей."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return method(self, *args, **kwargs)
+        except (RuntimeError, ValueError):
+            raise
+        except Exception as exc:  # noqa: BLE001 - осознанный catch-all для непредвиденных ошибок
+            log_unexpected_error(f"Api.{name}", exc)
+            raise RuntimeError(GENERIC_MESSAGE) from None
+
+    return wrapper
+
+
+class _AutoWrapErrorsMeta(type):
+    """Каждый публичный (не начинающийся с '_') метод класса автоматически
+    оборачивается _wrap_unexpected_errors - единая точка обработки
+    непредвиденных ошибок, без ручного try/except в каждом методе Api."""
+
+    def __new__(mcs, name, bases, namespace):
+        for attr_name, attr_value in list(namespace.items()):
+            if not attr_name.startswith("_") and callable(attr_value):
+                namespace[attr_name] = _wrap_unexpected_errors(attr_name, attr_value)
+        return super().__new__(mcs, name, bases, namespace)
+
+
+class Api(metaclass=_AutoWrapErrorsMeta):
     def __init__(self):
         self._settings = SettingsStore()
         self._client: GitHubClient | None = None

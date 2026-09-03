@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "./api";
+import { api, onBackendEvent } from "./api";
 import TopBar from "./components/TopBar";
 import RepoDialog from "./components/RepoDialog";
 import SettingsDialog from "./components/SettingsDialog";
@@ -15,6 +15,10 @@ export default function App() {
   const [operationInProgress, setOperationInProgress] = useState(false);
   const [repoDialogOpen, setRepoDialogOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Живёт на уровне App (не внутри DownloadScreen), т.к. issues-changed может
+  // прийти, пока экран Download размонтирован (например, аплоад идёт на
+  // экране Upload) - тогда сам DownloadScreen не может его поймать.
+  const [issuesMayBeStale, setIssuesMayBeStale] = useState(false);
 
   const refreshState = async () => {
     const state = await api.getAppState();
@@ -28,6 +32,8 @@ export default function App() {
   useEffect(() => {
     refreshState();
   }, []);
+
+  useEffect(() => onBackendEvent("issues-changed", () => setIssuesMayBeStale(true)), []);
 
   // Раздел 12: Ctrl+, открывает настройки.
   useEffect(() => {
@@ -65,6 +71,8 @@ export default function App() {
             <DownloadScreen
               currentRepo={currentRepo}
               onOperationStateChange={setOperationInProgress}
+              issuesMayBeStale={issuesMayBeStale}
+              onIssuesRefreshed={() => setIssuesMayBeStale(false)}
             />
           )}
         </div>

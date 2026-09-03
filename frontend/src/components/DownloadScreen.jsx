@@ -4,7 +4,7 @@ import { useDialog } from "../dialogs/DialogProvider";
 import IssueCard from "./IssueCard";
 import { SUPPORTED_SORT_FIELDS } from "../constants";
 
-export default function DownloadScreen({ currentRepo, onOperationStateChange }) {
+export default function DownloadScreen({ currentRepo, onOperationStateChange, issuesMayBeStale, onIssuesRefreshed }) {
   const ask = useDialog();
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -79,6 +79,7 @@ export default function DownloadScreen({ currentRepo, onOperationStateChange }) 
   const forceRefresh = async () => {
     await api.refreshIssuesCache();
     await load();
+    onIssuesRefreshed?.();
   };
 
   const ensureFolder = async () => {
@@ -208,6 +209,12 @@ export default function DownloadScreen({ currentRepo, onOperationStateChange }) 
         )}
       </div>
 
+      {issuesMayBeStale && (
+        <div className="notice-list stale-notice">
+          Список issues мог измениться в фоне (завершилась операция аплоада) — рекомендуется обновление.{" "}
+          <button className="btn" onClick={forceRefresh}>Обновить</button>
+        </div>
+      )}
       {error && <div className="notice-list" style={{ color: "var(--danger)" }}>{error}</div>}
       {loading && <div className="empty-state">Загрузка...</div>}
       {!loading && issues.length === 0 && <div className="empty-state">Issues не найдены</div>}
