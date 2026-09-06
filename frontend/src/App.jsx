@@ -6,6 +6,7 @@ import SettingsDialog from "./components/SettingsDialog";
 import UploadScreen from "./components/UploadScreen";
 import DownloadScreen from "./components/DownloadScreen";
 import { DialogProvider } from "./dialogs/DialogProvider";
+import { matchesShortcut, SHORTCUTS } from "./shortcuts";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("upload");
@@ -35,10 +36,11 @@ export default function App() {
 
   useEffect(() => onBackendEvent("issues-changed", () => setIssuesMayBeStale(true)), []);
 
-  // Раздел 12: Ctrl+, открывает настройки.
+  // Раздел 12: Ctrl+, открывает настройки. Определяется по физической
+  // клавише, поэтому срабатывает независимо от активной раскладки.
   useEffect(() => {
     const handler = (e) => {
-      if (e.ctrlKey && e.key === ",") {
+      if (matchesShortcut(e, SHORTCUTS.OPEN_SETTINGS)) {
         e.preventDefault();
         setSettingsOpen(true);
       }

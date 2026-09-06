@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, onBackendEvent } from "../api";
 import { useDialog } from "../dialogs/DialogProvider";
 import { runAddPathsPipeline } from "../upload/addPipeline";
+import { matchesShortcut, SHORTCUTS } from "../shortcuts";
 import UploadCard from "./UploadCard";
 
 export default function UploadScreen({ currentRepo, hasToken, onOperationStateChange }) {
@@ -130,16 +131,17 @@ export default function UploadScreen({ currentRepo, hasToken, onOperationStateCh
 
   useEffect(() => {
     const handler = (e) => {
-      if (e.key === "Delete") deleteSelected();
+      if (matchesShortcut(e, SHORTCUTS.DELETE_SELECTED)) deleteSelected();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [deleteSelected]);
 
   // Раздел 6/12: Ctrl+V должен давать тот же результат, что и drag&drop.
+  // Определяется по физической клавише - работает при любой раскладке.
   useEffect(() => {
     const handler = async (e) => {
-      if (!(e.ctrlKey && e.key.toLowerCase() === "v")) return;
+      if (!matchesShortcut(e, SHORTCUTS.PASTE)) return;
       const active = document.activeElement;
       const isEditable = active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA");
       if (isEditable) return; // не мешаем обычной вставке текста в поля
