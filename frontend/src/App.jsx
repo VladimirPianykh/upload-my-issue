@@ -6,7 +6,7 @@ import SettingsDialog from "./components/SettingsDialog";
 import UploadScreen from "./components/UploadScreen";
 import DownloadScreen from "./components/DownloadScreen";
 import { DialogProvider } from "./dialogs/DialogProvider";
-import { matchesShortcut, SHORTCUTS } from "./shortcuts";
+import { SHORTCUTS, useShortcut } from "./shortcuts";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("upload");
@@ -38,16 +38,10 @@ export default function App() {
 
   // Раздел 12: Ctrl+, открывает настройки. Определяется по физической
   // клавише, поэтому срабатывает независимо от активной раскладки.
-  useEffect(() => {
-    const handler = (e) => {
-      if (matchesShortcut(e, SHORTCUTS.OPEN_SETTINGS)) {
-        e.preventDefault();
-        setSettingsOpen(true);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
+  useShortcut(SHORTCUTS.OPEN_SETTINGS, (e) => {
+    e.preventDefault();
+    setSettingsOpen(true);
+  });
 
   return (
     <DialogProvider>

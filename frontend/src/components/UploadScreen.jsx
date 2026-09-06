@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, onBackendEvent } from "../api";
 import { useDialog } from "../dialogs/DialogProvider";
 import { runAddPathsPipeline } from "../upload/addPipeline";
-import { matchesShortcut, SHORTCUTS } from "../shortcuts";
+import { SHORTCUTS, useShortcut } from "../shortcuts";
 import UploadCard from "./UploadCard";
 
 export default function UploadScreen({ currentRepo, hasToken, onOperationStateChange }) {
@@ -129,32 +129,21 @@ export default function UploadScreen({ currentRepo, hasToken, onOperationStateCh
     setSelected(new Set());
   }, [ask, selected]);
 
-  useEffect(() => {
-    const handler = (e) => {
-      if (matchesShortcut(e, SHORTCUTS.DELETE_SELECTED)) deleteSelected();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [deleteSelected]);
+  useShortcut(SHORTCUTS.DELETE_SELECTED, () => deleteSelected());
 
   // Раздел 6/12: Ctrl+V должен давать тот же результат, что и drag&drop.
   // Определяется по физической клавише - работает при любой раскладке.
-  useEffect(() => {
-    const handler = async (e) => {
-      if (!matchesShortcut(e, SHORTCUTS.PASTE)) return;
-      const active = document.activeElement;
-      const isEditable = active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA");
-      if (isEditable) return; // не мешаем обычной вставке текста в поля
-      e.preventDefault();
-      const paths = await api.pasteFromClipboard();
-      if (!paths?.length) return;
-      const { addedCount, notices: n } = await runAddPathsPipeline(paths, ask);
-      await refreshQueue();
-      setNotices(n.length ? n : addedCount ? [`Добавлено файлов: ${addedCount}`] : []);
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [ask, refreshQueue]);
+  useShortcut(SHORTCUTS.PASTE, async (e) => {
+    const active = document.activeElement;
+    const isEditable = active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA");
+    if (isEditable) return; // не мешаем обычной вставке текста в поля
+    e.preventDefault();
+    const paths = await api.pasteFromClipboard();
+    if (!paths?.length) return;
+    const { addedCount, notices: n } = await runAddPathsPipeline(paths, ask);
+    await refreshQueue();
+    setNotices(n.length ? n : addedCount ? [`Добавлено файлов: ${addedCount}`] : []);
+  });
 
   const onTitleChange = async (id, title) => {
     setQueue((prev) => prev.map((i) => (i.id === id ? { ...i, title } : i)));

@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 /**
  * Раздел 12: shortcuts должны работать одинаково при любой раскладке
  * клавиатуры — определяться по физической клавише (KeyboardEvent.code),
@@ -9,19 +11,9 @@
  * поэтому для них никакой дополнительной нормализации не требуется.
  */
 
-// KeyboardEvent.code -> каноническое имя клавиши для основных клавиш numpad.
-const NUMPAD_DIGIT_NAMES = {
-  Numpad0: "numpad0",
-  Numpad1: "numpad1",
-  Numpad2: "numpad2",
-  Numpad3: "numpad3",
-  Numpad4: "numpad4",
-  Numpad5: "numpad5",
-  Numpad6: "numpad6",
-  Numpad7: "numpad7",
-  Numpad8: "numpad8",
-  Numpad9: "numpad9",
-};
+const LETTER_KEY = /^Key([A-Z])$/;
+const DIGIT_KEY = /^Digit([0-9])$/;
+const NUMPAD_DIGIT_KEY = /^Numpad([0-9])$/;
 
 /**
  * Возвращает каноническое, независимое от раскладки имя физической клавиши.
@@ -33,10 +25,13 @@ const NUMPAD_DIGIT_NAMES = {
  */
 export function keyNameFromEvent(e) {
   const code = e.code || "";
-  if (NUMPAD_DIGIT_NAMES[code]) return NUMPAD_DIGIT_NAMES[code];
-  if (code.startsWith("Key") && code.length === 4) return code.slice(3);
-  if (code.startsWith("Digit") && code.length === 6) return code.slice(5);
-  return code;
+  const numpadMatch = NUMPAD_DIGIT_KEY.exec(code);
+  return (
+    LETTER_KEY.exec(code)?.[1] ??
+    DIGIT_KEY.exec(code)?.[1] ??
+    (numpadMatch && `numpad${numpadMatch[1]}`) ??
+    code
+  );
 }
 
 /**
@@ -44,10 +39,12 @@ export function keyNameFromEvent(e) {
  * `shortcut.key` - каноническое имя клавиши (см. keyNameFromEvent).
  */
 export function matchesShortcut(e, { key, ctrl = false, shift = false, alt = false }) {
-  if (!!e.ctrlKey !== ctrl) return false;
-  if (!!e.shiftKey !== shift) return false;
-  if (!!e.altKey !== alt) return false;
-  return keyNameFromEvent(e) === key;
+  return (
+    !!e.ctrlKey === ctrl &&
+    !!e.shiftKey === shift &&
+    !!e.altKey === alt &&
+    keyNameFromEvent(e) === key
+  );
 }
 
 // Встроенные (пока не настраиваемые пользователем) shortcuts приложения.
@@ -57,3 +54,24 @@ export const SHORTCUTS = {
   PASTE: { key: "V", ctrl: true },
   DELETE_SELECTED: { key: "Delete" },
 };
+
+/**
+ * Подписывает `handler` на глобальный shortcut, независимый от раскладки.
+ * `handler` не обязан быть мемоизирован - актуальная версия читается из
+ * ref, поэтому слушатель `keydown` переподписывается только при смене
+ * самого shortcut'а, а не при каждом рендере компонента.
+ */
+export function useShortcut(shortcut, handler) {
+  const handlerRef = useRef(handler);
+  useEffect(() => {
+    handlerRef.current = handler;
+  });
+
+  useEffect(() => {
+    const listener = (e) => {
+      if (matchesShortcut(e, shortcut)) handlerRef.current(e);
+    };
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, [shortcut]);
+}
