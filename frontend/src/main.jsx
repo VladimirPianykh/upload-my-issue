@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 import App from "./App.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
+import { DialogOpenProvider } from "./dialogGate.jsx";
 
 // overview, раздел 2: непредвиденные ошибки вне React-рендера (обработчики
 // событий, оторванные промисы) не должны молча теряться - логируем их так же,
@@ -17,7 +18,9 @@ window.addEventListener("unhandledrejection", (e) => {
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <ErrorBoundary>
-      <App />
+      <DialogOpenProvider>
+        <App />
+      </DialogOpenProvider>
     </ErrorBoundary>
   </StrictMode>
 );

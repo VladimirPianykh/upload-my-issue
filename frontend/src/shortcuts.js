@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useAnyDialogOpen } from "./dialogGate";
 
 /**
  * Раздел 12: shortcuts должны работать одинаково при любой раскладке
@@ -35,6 +36,15 @@ export function keyNameFromEvent(e) {
 }
 
 /**
+ * Является ли элемент полем ввода текста (input/textarea), в котором
+ * должно сохраняться стандартное поведение браузера (например, свой
+ * Ctrl+A для выделения текста, свой Ctrl+V для вставки текста).
+ */
+export function isEditableTarget(el) {
+  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA");
+}
+
+/**
  * Проверяет, соответствует ли событие клавиатуры описанию shortcut'а.
  * `shortcut.key` - каноническое имя клавиши (см. keyNameFromEvent).
  */
@@ -53,6 +63,13 @@ export const SHORTCUTS = {
   OPEN_SETTINGS: { key: "Comma", ctrl: true },
   PASTE: { key: "V", ctrl: true },
   DELETE_SELECTED: { key: "Delete" },
+  // Additional shortcuts.md: переключение фокуса между вкладками Upload/Download.
+  FOCUS_UPLOAD_TAB: { key: "BracketLeft", ctrl: true },
+  FOCUS_DOWNLOAD_TAB: { key: "BracketRight", ctrl: true },
+  // Additional shortcuts.md: снятие выделения / выделение всех элементов
+  // активной вкладки.
+  DESELECT: { key: "Escape" },
+  SELECT_ALL: { key: "A", ctrl: true },
 };
 
 /**
@@ -60,6 +77,10 @@ export const SHORTCUTS = {
  * `handler` не обязан быть мемоизирован - актуальная версия читается из
  * ref, поэтому слушатель `keydown` переподписывается только при смене
  * самого shortcut'а, а не при каждом рендере компонента.
+ *
+ * Additional shortcuts.md: "Сочетания не обрабатываются при открытом
+ * внутреннем диалоге приложения" - действует для всех shortcut'ов сразу,
+ * через общий DialogOpenProvider (см. dialogGate.jsx).
  */
 export function useShortcut(shortcut, handler) {
   const handlerRef = useRef(handler);
@@ -67,8 +88,15 @@ export function useShortcut(shortcut, handler) {
     handlerRef.current = handler;
   });
 
+  const anyDialogOpen = useAnyDialogOpen();
+  const anyDialogOpenRef = useRef(anyDialogOpen);
+  useEffect(() => {
+    anyDialogOpenRef.current = anyDialogOpen;
+  }, [anyDialogOpen]);
+
   useEffect(() => {
     const listener = (e) => {
+      if (anyDialogOpenRef.current) return;
       if (matchesShortcut(e, shortcut)) handlerRef.current(e);
     };
     window.addEventListener("keydown", listener);

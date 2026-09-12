@@ -43,6 +43,22 @@ export default function App() {
     setSettingsOpen(true);
   });
 
+  // Additional shortcuts.md: Ctrl+[ / Ctrl+] переводят фокус на вкладку
+  // Upload/Download независимо от того, какая вкладка сейчас активна.
+  // Срабатывают даже при фокусе в поле ввода (в отличие от Ctrl+V) - см.
+  // useShortcut/SHORTCUTS в shortcuts.js, где нет проверки isEditableTarget.
+  useShortcut(SHORTCUTS.FOCUS_UPLOAD_TAB, (e) => {
+    e.preventDefault();
+    setActiveTab("upload");
+  });
+  useShortcut(SHORTCUTS.FOCUS_DOWNLOAD_TAB, (e) => {
+    e.preventDefault();
+    setActiveTab("download");
+  });
+
+  const isUploadActive = activeTab === "upload";
+  const isDownloadActive = activeTab === "download";
+
   return (
     <DialogProvider>
       <div className="app">
@@ -56,21 +72,32 @@ export default function App() {
           onOpenSettings={() => setSettingsOpen(true)}
         />
 
+        {/*
+          Additional shortcuts.md: выделение элементов на одной вкладке
+          должно сохраняться при переключении на другую и обратно. Раз оба
+          экрана держат выделение в собственном React-состоянии, для этого
+          оба должны оставаться смонтированными постоянно - переключение
+          вкладок скрывает неактивный экран через CSS, а не размонтирует
+          его.
+        */}
         <div className="content">
-          {activeTab === "upload" ? (
+          <div hidden={!isUploadActive}>
             <UploadScreen
+              isActive={isUploadActive}
               currentRepo={currentRepo}
               hasToken={hasToken}
               onOperationStateChange={setOperationInProgress}
             />
-          ) : (
+          </div>
+          <div hidden={!isDownloadActive}>
             <DownloadScreen
+              isActive={isDownloadActive}
               currentRepo={currentRepo}
               onOperationStateChange={setOperationInProgress}
               issuesMayBeStale={issuesMayBeStale}
               onIssuesRefreshed={() => setIssuesMayBeStale(false)}
             />
-          )}
+          </div>
         </div>
 
         {repoDialogOpen && (

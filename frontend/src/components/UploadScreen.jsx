@@ -2,10 +2,22 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, onBackendEvent } from "../api";
 import { useDialog } from "../dialogs/DialogProvider";
 import { runAddPathsPipeline } from "../upload/addPipeline";
-import { SHORTCUTS, useShortcut } from "../shortcuts";
+import { SHORTCUTS, useShortcut, isEditableTarget } from "../shortcuts";
 import UploadCard from "./UploadCard";
 
-export default function UploadScreen({ currentRepo, hasToken, onOperationStateChange }) {
+/**
+ * Оборачивает useShortcut так, чтобы handler срабатывал, только пока эта
+ * вкладка активна. Оба экрана (Upload/Download) остаются смонтированными
+ * одновременно (см. App.jsx), поэтому каждый должен сам игнорировать
+ * shortcuts, пока пользователь смотрит на другую вкладку.
+ */
+function useActiveShortcut(shortcut, isActive, handler) {
+  useShortcut(shortcut, (e) => {
+    if (isActive) handler(e);
+  });
+}
+
+export default function UploadScreen({ currentRepo, hasToken, onOperationStateChange, isActive = true }) {
   const ask = useDialog();
   const [queue, setQueue] = useState([]);
   const [selected, setSelected] = useState(new Set());
@@ -86,6 +98,24 @@ export default function UploadScreen({ currentRepo, hasToken, onOperationStateCh
     if (submitJobId) await api.cancelJob(submitJobId);
   };
 
+  const displayedQueue = useMemo(() => {
+    let result = queue;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter(
+        (i) => i.title.toLowerCase().includes(q) || i.original_filename.toLowerCase().includes(q)
+      );
+    }
+    if (sortBy === "title") {
+      result = [...result].sort((a, b) => a.title.localeCompare(b.title));
+    } else if (sortBy === "filename") {
+      result = [...result].sort((a, b) => a.original_filename.localeCompare(b.original_filename));
+    } else if (sortBy === "errors") {
+      result = [...result].sort((a, b) => (b.error ? 1 : 0) - (a.error ? 1 : 0));
+    }
+    return result;
+  }, [queue, search, sortBy]);
+
   const addViaFiles = async () => {
     const files = await api.chooseUploadFiles();
     if (!files?.length) return;
@@ -105,7 +135,11 @@ export default function UploadScreen({ currentRepo, hasToken, onOperationStateCh
   const toggleSelect = (id) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
       return next;
     });
   };
@@ -129,20 +163,34 @@ export default function UploadScreen({ currentRepo, hasToken, onOperationStateCh
     setSelected(new Set());
   }, [ask, selected]);
 
-  useShortcut(SHORTCUTS.DELETE_SELECTED, () => deleteSelected());
+  useActiveShortcut(SHORTCUTS.DELETE_SELECTED, isActive, deleteSelected);
 
   // Раздел 6/12: Ctrl+V должен давать тот же результат, что и drag&drop.
   // Определяется по физической клавише - работает при любой раскладке.
-  useShortcut(SHORTCUTS.PASTE, async (e) => {
-    const active = document.activeElement;
-    const isEditable = active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA");
-    if (isEditable) return; // не мешаем обычной вставке текста в поля
+  useActiveShortcut(SHORTCUTS.PASTE, isActive, async (e) => {
+    if (isEditableTarget(document.activeElement)) return; // не мешаем обычной вставке текста в поля
     e.preventDefault();
     const paths = await api.pasteFromClipboard();
     if (!paths?.length) return;
     const { addedCount, notices: n } = await runAddPathsPipeline(paths, ask);
     await refreshQueue();
     setNotices(n.length ? n : addedCount ? [`Добавлено файлов: ${addedCount}`] : []);
+  });
+
+  // Additional shortcuts.md: Escape снимает выделение карточек только на
+  // активной вкладке; Ctrl+A выделяет все карточки текущего (отфильтрован-
+  // ного) списка активной вкладки, независимо от прокрутки, заменяя любое
+  // частичное выделение, и не трогает поля ввода (там остаётся родное
+  // выделение текста).
+  useActiveShortcut(SHORTCUTS.DESELECT, isActive, () => {
+    if (selected.size === 0) return;
+    clearSelection();
+  });
+  useActiveShortcut(SHORTCUTS.SELECT_ALL, isActive, (e) => {
+    if (isEditableTarget(document.activeElement)) return; // родное выделение текста в поле
+    e.preventDefault();
+    if (displayedQueue.length === 0) return;
+    selectAll();
   });
 
   const onTitleChange = async (id, title) => {
@@ -197,24 +245,6 @@ export default function UploadScreen({ currentRepo, hasToken, onOperationStateCh
     const jobId = await api.submitUpload(null);
     setSubmitJobId(jobId);
   };
-
-  const displayedQueue = useMemo(() => {
-    let result = queue;
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (i) => i.title.toLowerCase().includes(q) || i.original_filename.toLowerCase().includes(q)
-      );
-    }
-    if (sortBy === "title") {
-      result = [...result].sort((a, b) => a.title.localeCompare(b.title));
-    } else if (sortBy === "filename") {
-      result = [...result].sort((a, b) => a.original_filename.localeCompare(b.original_filename));
-    } else if (sortBy === "errors") {
-      result = [...result].sort((a, b) => (b.error ? 1 : 0) - (a.error ? 1 : 0));
-    }
-    return result;
-  }, [queue, search, sortBy]);
 
   if (!currentRepo) {
     return <div className="empty-state">Сначала выберите репозиторий вверху экрана.</div>;

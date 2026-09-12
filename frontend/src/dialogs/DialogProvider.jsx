@@ -1,10 +1,14 @@
 import { createContext, useCallback, useContext, useRef, useState } from "react";
+import { useRegisterDialogOpen } from "../dialogGate";
 
 const DialogContext = createContext(null);
 
 export function DialogProvider({ children }) {
   const [dialog, setDialog] = useState(null);
   const resolverRef = useRef(null);
+  // Additional shortcuts.md: shortcut'ы блокируются, пока открыт любой
+  // внутренний диалог - в том числе промис-диалог этого провайдера.
+  useRegisterDialogOpen(!!dialog);
 
   const ask = useCallback((config) => {
     return new Promise((resolve) => {

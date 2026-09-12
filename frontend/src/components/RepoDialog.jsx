@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { useRegisterDialogOpen } from "../dialogGate";
 
 export default function RepoDialog({ onClose, onSelected }) {
+  // Компонент существует в дереве, только пока диалог открыт (см. App.jsx),
+  // поэтому регистрируем себя как открытый безусловно.
+  useRegisterDialogOpen(true);
   const [url, setUrl] = useState("");
   const [urlError, setUrlError] = useState(null);
   const [repos, setRepos] = useState(null); // null = загрузка

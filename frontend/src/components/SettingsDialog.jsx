@@ -1,8 +1,12 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useDialog } from "../dialogs/DialogProvider";
+import { useRegisterDialogOpen } from "../dialogGate";
 
 export default function SettingsDialog({ onClose, onAccountChanged }) {
+  // Компонент существует в дереве, только пока диалог открыт (см. App.jsx),
+  // поэтому регистрируем себя как открытый безусловно.
+  useRegisterDialogOpen(true);
   const ask = useDialog();
   const [maskedToken, setMaskedToken] = useState(null);
   const [tokenInput, setTokenInput] = useState("");

@@ -3,8 +3,27 @@ import { api, onBackendEvent } from "../api";
 import { useDialog } from "../dialogs/DialogProvider";
 import IssueCard from "./IssueCard";
 import { SUPPORTED_SORT_FIELDS } from "../constants";
+import { SHORTCUTS, useShortcut, isEditableTarget } from "../shortcuts";
 
-export default function DownloadScreen({ currentRepo, onOperationStateChange, issuesMayBeStale, onIssuesRefreshed }) {
+/**
+ * Оборачивает useShortcut так, чтобы handler срабатывал, только пока эта
+ * вкладка активна. Оба экрана (Upload/Download) остаются смонтированными
+ * одновременно (см. App.jsx), поэтому каждый должен сам игнорировать
+ * shortcuts, пока пользователь смотрит на другую вкладку.
+ */
+function useActiveShortcut(shortcut, isActive, handler) {
+  useShortcut(shortcut, (e) => {
+    if (isActive) handler(e);
+  });
+}
+
+export default function DownloadScreen({
+  currentRepo,
+  onOperationStateChange,
+  issuesMayBeStale,
+  onIssuesRefreshed,
+  isActive = true,
+}) {
   const ask = useDialog();
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -167,10 +186,30 @@ export default function DownloadScreen({ currentRepo, onOperationStateChange, is
   const toggleSelect = (number) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      next.has(number) ? next.delete(number) : next.add(number);
+      if (next.has(number)) {
+        next.delete(number);
+      } else {
+        next.add(number);
+      }
       return next;
     });
   };
+
+  // Additional shortcuts.md: Escape снимает выделение issues только на
+  // активной вкладке; Ctrl+A выделяет все issues текущего (загруженного)
+  // списка активной вкладки - GitHub API отдаёт issues постранично (см.
+  // essential.md, раздел 4), поэтому "весь список" здесь - это issues
+  // текущей страницы, а не всего репозитория.
+  useActiveShortcut(SHORTCUTS.DESELECT, isActive, () => {
+    if (selected.size === 0) return;
+    setSelected(new Set());
+  });
+  useActiveShortcut(SHORTCUTS.SELECT_ALL, isActive, (e) => {
+    if (isEditableTarget(document.activeElement)) return; // родное выделение текста в поле
+    e.preventDefault();
+    if (issues.length === 0) return;
+    setSelected(new Set(issues.map((i) => i.number)));
+  });
 
   if (!currentRepo) {
     return <div className="empty-state">Сначала выберите репозиторий вверху экрана.</div>;
