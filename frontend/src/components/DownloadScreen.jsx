@@ -51,6 +51,8 @@ export default function DownloadScreen({
   }, [searchInput]);
 
   const loadIdRef = useRef(0);
+  const hasBeenActivatedRef = useRef(false);
+
   const load = useCallback(async () => {
     if (!currentRepo) return;
     const loadId = ++loadIdRef.current;
@@ -78,22 +80,31 @@ export default function DownloadScreen({
     }
   }, [currentRepo, page, state, sort, direction, search, labelFilter]);
 
-  useEffect(() => { load(); }, [load]);
-
+  // Lazy initialization: запустить load и загрузить labels/settings только при первом открытии вкладки
   useEffect(() => {
+    if (!isActive || hasBeenActivatedRef.current) return;
+    hasBeenActivatedRef.current = true;
+    load();
+    if (currentRepo) {
+      api.listRepositoryLabels().then(setRepoLabels).catch(() => setRepoLabels([]));
+    }
+    api.openSettings().then((s) => setDefaultFolder(s.download_default_folder));
+  }, [isActive, load, currentRepo]);
+
+  // Перезагрузить при смене параметров фильтра (но только если уже было активировано)
+  useEffect(() => {
+    if (!hasBeenActivatedRef.current) return;
     setPage(1);
     setSelected(new Set());
     selectedIssuesRef.current.clear();
-  }, [currentRepo, state, sort, direction, search, labelFilter]);
+    load();
+  }, [state, sort, direction, search, labelFilter, load]);
 
+  // Перезагрузить labels при смене репо (но только если уже было активировано)
   useEffect(() => {
-    if (!currentRepo) return;
+    if (!hasBeenActivatedRef.current || !currentRepo) return;
     api.listRepositoryLabels().then(setRepoLabels).catch(() => setRepoLabels([]));
   }, [currentRepo]);
-
-  useEffect(() => {
-    api.openSettings().then((s) => setDefaultFolder(s.download_default_folder));
-  }, []);
 
   const forceRefresh = async () => {
     await api.refreshIssuesCache();
