@@ -42,8 +42,10 @@ export const api = {
       opts.labels ?? null,
       opts.sort ?? "created",
       opts.direction ?? "desc",
-      opts.search ?? null
+      opts.search ?? null,
+      opts.dependencyFilters ?? null
     ),
+  searchIssuesForDependencyFilter: (query) => call("search_issues_for_dependency_filter", query),
   refreshIssuesCache: () => call("refresh_issues_cache"),
 
   openInBrowser: (url) => call("open_in_browser", url),

@@ -16,8 +16,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 import requests
+
+from dependency_graph import BLOCKED_BY, BLOCKING
 
 API_ROOT = "https://api.github.com"
 _TIMEOUT = 30
@@ -66,6 +69,11 @@ class Issue:
     labels: list[Label]
     html_url: str
     is_pull_request: bool
+    created_at: str = ""
+    updated_at: str = ""
+    comments: int = 0
+    dependencies_count: int = 0  # сколько issues блокируют этот (total_blocked_by)
+    dependents_count: int = 0  # сколько issues этот блокирует (total_blocking)
 
 
 class GitHubClient:
@@ -222,6 +230,32 @@ class GitHubClient:
         )
         return [_issue_from_json(item) for item in resp.json().get("items", [])]
 
+    # -- Dependency filter: зависимости issue -----------------------------------
+
+    def list_issue_dependencies(self, owner: str, repo: str, number: int, direction: str) -> list[Issue]:
+        """Прямые зависимости issue одного репозитория (все страницы).
+
+        direction: BLOCKED_BY - issues, от которых зависит `number`;
+        BLOCKING - issues, которые зависят от `number`. Issues других
+        репозиториев в результат не попадают (спецификация их игнорирует).
+        """
+        if direction not in (BLOCKED_BY, BLOCKING):
+            raise ValueError(f"Unsupported dependency direction: {direction}")
+        issues: list[Issue] = []
+        page = 1
+        while True:
+            resp = self._request(
+                "GET",
+                f"/repos/{owner}/{repo}/issues/{number}/dependencies/{direction}",
+                params={"per_page": 100, "page": page},
+            )
+            batch = resp.json()
+            issues.extend(_issue_from_json(i) for i in batch if _belongs_to_repo(i, owner, repo))
+            if len(batch) < 100:
+                break
+            page += 1
+        return issues
+
     # -- Раздел 9/10: создание Issue -------------------------------------------
 
     def create_issue(self, owner: str, repo: str, title: str, body: str, labels: list[str] | None = None) -> Issue:
@@ -233,6 +267,7 @@ class GitHubClient:
 
 
 def _issue_from_json(data: dict) -> Issue:
+    summary = data.get("issue_dependencies_summary") or {}
     return Issue(
         number=data["number"],
         title=data["title"],
@@ -243,7 +278,20 @@ def _issue_from_json(data: dict) -> Issue:
         # Раздел 4: Issues API может возвращать pull requests - отличаем по
         # наличию ключа 'pull_request'.
         is_pull_request="pull_request" in data,
+        created_at=data.get("created_at", ""),
+        updated_at=data.get("updated_at", ""),
+        comments=data.get("comments", 0),
+        dependencies_count=summary.get("total_blocked_by", 0),
+        dependents_count=summary.get("total_blocking", 0),
     )
+
+
+def _belongs_to_repo(data: dict, owner: str, repo: str) -> bool:
+    """Issue принадлежит репозиторию owner/repo? Проверка по пути html_url
+    (стабильнее repository_url, который в документации встречается и в виде
+    /repositories/<id>); имена репозиториев регистронезависимы."""
+    path = urlparse(data.get("html_url", "")).path.lower()
+    return path.startswith(f"/{owner}/{repo}/".lower())
 
 
 def _extract_message(resp: requests.Response) -> str | None:

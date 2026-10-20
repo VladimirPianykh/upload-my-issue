@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, onBackendEvent } from "../api";
 import { useDialog } from "../dialogs/DialogProvider";
 import IssueCard from "./IssueCard";
+import DependencySearchBox from "./DependencySearchBox";
+import DependencyFilterChips from "./DependencyFilterChips";
 import { SUPPORTED_SORT_FIELDS } from "../constants";
 import { SHORTCUTS, useShortcut, isEditableTarget } from "../shortcuts";
 
@@ -16,6 +18,9 @@ function useActiveShortcut(shortcut, isActive, handler) {
     if (isActive) handler(e);
   });
 }
+
+// Стабильная ссылка: `load` зависит от списка фильтров, новый [] на каждый рендер зациклил бы перезагрузку.
+const NO_DEPENDENCY_FILTERS = [];
 
 export default function DownloadScreen({
   currentRepo,
@@ -36,6 +41,12 @@ export default function DownloadScreen({
   const [searchInput, setSearchInput] = useState("");
   const [labelFilter, setLabelFilter] = useState("");
   const [repoLabels, setRepoLabels] = useState([]);
+  // Dependency filter.md: выбранные фильтры зависимостей [{mode, label, number, title}].
+  // Номера issue относятся к конкретному репозиторию, поэтому фильтры хранятся
+  // вместе с ним, а для другого репозитория читаются как пустые.
+  const [dependencyState, setDependencyState] = useState({ repo: currentRepo, filters: NO_DEPENDENCY_FILTERS });
+  const dependencyFilters =
+    dependencyState.repo === currentRepo ? dependencyState.filters : NO_DEPENDENCY_FILTERS;
   const [selected, setSelected] = useState(new Set());
   // Данные выбранных issues по всем страницам, не только текущей: `issues`
   // содержит лишь одну страницу, поэтому для скачивания нельзя опираться
@@ -66,6 +77,9 @@ export default function DownloadScreen({
         sort,
         direction,
         search: search.trim() || null,
+        dependencyFilters: dependencyFilters.length
+          ? dependencyFilters.map(({ mode, number }) => ({ mode, number }))
+          : null,
       });
       if (loadIdRef.current !== loadId) return; // пришёл устаревший ответ - игнорируем
       setIssues(result.issues);
@@ -78,7 +92,7 @@ export default function DownloadScreen({
     } finally {
       if (loadIdRef.current === loadId) setLoading(false);
     }
-  }, [currentRepo, page, state, sort, direction, search, labelFilter]);
+  }, [currentRepo, page, state, sort, direction, search, labelFilter, dependencyFilters]);
 
   // Lazy initialization: запустить load и загрузить labels/settings только при первом открытии вкладки
   useEffect(() => {
@@ -105,6 +119,16 @@ export default function DownloadScreen({
     if (!hasBeenActivatedRef.current || !currentRepo) return;
     api.listRepositoryLabels().then(setRepoLabels).catch(() => setRepoLabels([]));
   }, [currentRepo]);
+
+  const addDependencyFilter = (construct, issue) => {
+    if (dependencyFilters.some((f) => f.mode === construct.mode && f.number === issue.number)) return;
+    const added = { mode: construct.mode, label: construct.label, number: issue.number, title: issue.title };
+    setDependencyState({ repo: currentRepo, filters: [...dependencyFilters, added] });
+  };
+
+  const removeDependencyFilter = (filter) => {
+    setDependencyState({ repo: currentRepo, filters: dependencyFilters.filter((f) => f !== filter) });
+  };
 
   const forceRefresh = async () => {
     await api.refreshIssuesCache();
@@ -245,7 +269,12 @@ export default function DownloadScreen({
           <option value="">Все labels</option>
           {repoLabels.map((l) => <option key={l.name} value={l.name}>{l.name}</option>)}
         </select>
-        <input type="text" placeholder="Поиск по title..." value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
+        <DependencySearchBox
+          value={searchInput}
+          onChange={setSearchInput}
+          onPickIssue={addDependencyFilter}
+          placeholder="Поиск по title..."
+        />
         <button className="btn" onClick={forceRefresh}>Обновить</button>
         <div style={{ flex: 1 }} />
         <button className="btn btn-primary" disabled={selected.size === 0 || !!bulkJob} onClick={bulkDownload}>
@@ -258,6 +287,8 @@ export default function DownloadScreen({
           </>
         )}
       </div>
+
+      <DependencyFilterChips filters={dependencyFilters} onRemove={removeDependencyFilter} />
 
       {issuesMayBeStale && (
         <div className="notice-list stale-notice">
