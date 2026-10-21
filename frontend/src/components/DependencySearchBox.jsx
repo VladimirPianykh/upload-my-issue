@@ -1,8 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { api } from "../api";
 import { applyConstruct, getAutocompleteContext, removeFilterText } from "../dependencySearch";
-
-const AUTOCOMPLETE_DEBOUNCE_MS = 250;
+import { useIssueSuggestions } from "../useIssueSuggestions";
+import AutocompletePopup from "./AutocompletePopup";
 
 /**
  * Поисковая строка Download с автодополнением фильтров зависимостей
@@ -20,27 +19,11 @@ export default function DependencySearchBox({ value, onChange, onPickIssue, plac
   const [caret, setCaret] = useState(0);
   const [dismissed, setDismissed] = useState(true); // до первого фокуса список закрыт
   const [highlight, setHighlight] = useState(0);
-  const [found, setFound] = useState({ query: null, items: [], error: null });
 
   const context = dismissed ? null : getAutocompleteContext(value, Math.min(caret, value.length));
-  const issueQuery = context?.kind === "issue" ? context.query : null;
-
-  useEffect(() => {
-    if (issueQuery === null) return undefined;
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      try {
-        const items = await api.searchIssuesForDependencyFilter(issueQuery);
-        if (!cancelled) setFound({ query: issueQuery, items, error: null });
-      } catch (err) {
-        if (!cancelled) setFound({ query: issueQuery, items: [], error: err?.message || String(err) });
-      }
-    }, AUTOCOMPLETE_DEBOUNCE_MS);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [issueQuery]);
+  const suggestions = useIssueSuggestions(context?.kind === "issue" ? context.query : null);
+  const entries = context?.kind === "construct" ? context.options : suggestions.items;
+  const active = Math.min(highlight, Math.max(entries.length - 1, 0));
 
   useEffect(() => {
     const closeOnOutsideClick = (e) => {
@@ -56,37 +39,33 @@ export default function DependencySearchBox({ value, onChange, onPickIssue, plac
     pendingCaretRef.current = null;
   });
 
-  const loaded = issueQuery !== null && found.query === issueQuery;
-  const entries =
-    context?.kind === "construct" ? context.options : loaded && !found.error ? found.items : [];
-  const active = entries.length > 0 ? Math.min(highlight, entries.length - 1) : 0;
-
-  const moveCaret = (position) => {
-    pendingCaretRef.current = position;
+  /** Каретка перемещена пользователем или программно: список определяется заново. */
+  const reopenAt = (position) => {
     setCaret(position);
     setDismissed(false);
     setHighlight(0);
   };
 
+  const placeCaret = (position) => {
+    pendingCaretRef.current = position;
+    reopenAt(position);
+  };
+
   const pick = (entry) => {
     if (context.kind === "construct") {
       const next = applyConstruct(value, context, entry);
-      moveCaret(next.caret);
+      placeCaret(next.caret);
       onChange(next.text);
     } else {
       const next = removeFilterText(value, context);
-      moveCaret(next.caret);
+      placeCaret(next.caret);
       onChange(next.text);
       onPickIssue(context.construct, entry);
     }
   };
 
   const syncCaret = (e) => {
-    const position = e.target.selectionStart;
-    if (position === caret) return;
-    setCaret(position);
-    setDismissed(false);
-    setHighlight(0);
+    if (e.target.selectionStart !== caret) reopenAt(e.target.selectionStart);
   };
 
   const handleKeyDown = (e) => {
@@ -114,9 +93,7 @@ export default function DependencySearchBox({ value, onChange, onPickIssue, plac
         value={value}
         onChange={(e) => {
           onChange(e.target.value);
-          setCaret(e.target.selectionStart);
-          setDismissed(false);
-          setHighlight(0);
+          reopenAt(e.target.selectionStart);
         }}
         onFocus={(e) => {
           setCaret(e.target.selectionStart);
@@ -129,47 +106,13 @@ export default function DependencySearchBox({ value, onChange, onPickIssue, plac
         onKeyDown={handleKeyDown}
       />
       {context && (
-        <div
-          className="dep-popup"
-          role="listbox"
-          aria-label="Автодополнение"
-          onMouseDown={(e) => e.preventDefault()} // клик по списку не должен уводить фокус из поля
-        >
-          {context.kind === "construct" &&
-            entries.map((c, i) => (
-              <div
-                key={c.token}
-                role="option"
-                aria-selected={i === active}
-                className={`dep-option${i === active ? " active" : ""}`}
-                onClick={() => pick(c)}
-              >
-                <code>{c.token}</code> <span className="dep-dim">{c.label}</span>
-              </div>
-            ))}
-          {context.kind === "issue" && !loaded && <div className="dep-message">Загрузка...</div>}
-          {context.kind === "issue" && loaded && found.error && (
-            <div className="dep-message dep-error">{found.error}</div>
-          )}
-          {context.kind === "issue" && loaded && !found.error && entries.length === 0 && (
-            <div className="dep-message">Issues не найдены</div>
-          )}
-          {context.kind === "issue" &&
-            entries.map((issue, i) => (
-              <div
-                key={issue.number}
-                role="option"
-                aria-selected={i === active}
-                className={`dep-option${i === active ? " active" : ""}`}
-                onClick={() => pick(issue)}
-              >
-                <span className="dep-option-title">#{issue.number} {issue.title}</span>
-                <span className={`state-pill ${issue.state}`}>{issue.state}</span>
-                <span className="dep-dim">Зависимости: {issue.dependencies_count}</span>
-                <span className="dep-dim">Зависимые: {issue.dependents_count}</span>
-              </div>
-            ))}
-        </div>
+        <AutocompletePopup
+          kind={context.kind}
+          entries={entries}
+          suggestions={suggestions}
+          active={active}
+          onPick={pick}
+        />
       )}
     </div>
   );

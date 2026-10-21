@@ -249,18 +249,18 @@ input[type="text"], input[type="password"], select {
 .dep-search { position: relative; display: inline-block; }
 .dep-popup {
   position: absolute; top: 100%; left: 0; z-index: 20; min-width: 360px; max-width: 520px;
-  margin-top: 4px; padding: 4px; background: var(--bg-elevated, #fff);
-  border: 1px solid var(--border, #d0d7de); border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  margin-top: 4px; padding: 4px; background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 .dep-option { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
-.dep-option.active, .dep-option:hover { background: rgba(88, 166, 255, 0.18); }
+.dep-option.active, .dep-option:hover { background: rgba(79, 140, 255, 0.18); }
 .dep-option-title { flex: 1 1 100%; font-weight: 600; }
 .dep-dim { color: var(--text-dim); font-size: 12px; }
 .dep-message { padding: 8px; color: var(--text-dim); font-size: 13px; }
 .dep-error { color: var(--danger); }
 .dep-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; }
-.dep-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border: 1px solid var(--border, #d0d7de); border-radius: 999px; font-size: 13px; }
+.dep-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 13px; }
 .dep-chip-mode { color: var(--text-dim); }
 .dep-chip-remove { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 16px; line-height: 1; padding: 0 6px; border-radius: 50%; }
 .dep-chip-remove:hover { background: rgba(229, 83, 75, 0.2); color: var(--danger); }

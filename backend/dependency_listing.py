@@ -38,6 +38,8 @@ class DependencyClient(Protocol):
 
 
 class DependencyIssueLister:
+    # Публичный `list` объявлен последним: имя метода затеняет встроенный `list`
+    # в области класса, а аннотации остальных методов должны ссылаться на него.
     def __init__(self, client: DependencyClient):
         self._client = client
         self._neighbors: dict[tuple[str, str, int, str], list[int]] = {}
@@ -46,6 +48,24 @@ class DependencyIssueLister:
     def invalidate(self) -> None:
         self._neighbors.clear()
         self._issues.clear()
+
+    def _neighbors_of(self, owner: str, repo: str, number: int, link_direction: str) -> list[int]:
+        key = (owner, repo, number, link_direction)
+        if key not in self._neighbors:
+            issues = self._client.list_issue_dependencies(owner, repo, number, link_direction)
+            for issue in issues:
+                self._issues[(owner, repo, issue.number)] = issue
+            self._neighbors[key] = [issue.number for issue in issues]
+        return self._neighbors[key]
+
+    def _closure_of(self, owner: str, repo: str, dependency_filter: DependencyFilter) -> set[int]:
+        def neighbors(number: int, link_direction: str) -> list[int]:
+            return self._neighbors_of(owner, repo, number, link_direction)
+
+        try:
+            return collect_closure(dependency_filter.number, dependency_filter.mode, neighbors)
+        except AssertionError as exc:
+            raise DependencyCycleError(str(exc)) from exc
 
     def list(
         self,
@@ -67,15 +87,7 @@ class DependencyIssueLister:
             raise ValueError("At least one dependency filter is required")
         validate_query_params(state, sort, direction)
 
-        def neighbors(number: int, link_direction: str) -> list[int]:
-            return self._neighbors_of(owner, repo, number, link_direction)
-
-        try:
-            closures = [collect_closure(f.number, f.mode, neighbors) for f in filters]
-        except AssertionError as exc:
-            raise DependencyCycleError(str(exc)) from exc
-
-        numbers = set.intersection(*closures)
+        numbers = set.intersection(*(self._closure_of(owner, repo, f) for f in filters))
         return query_issues(
             (self._issues[(owner, repo, n)] for n in numbers),
             state=state,
@@ -86,12 +98,3 @@ class DependencyIssueLister:
             page=page,
             per_page=per_page,
         )
-
-    def _neighbors_of(self, owner: str, repo: str, number: int, link_direction: str) -> list[int]:
-        key = (owner, repo, number, link_direction)
-        if key not in self._neighbors:
-            issues = self._client.list_issue_dependencies(owner, repo, number, link_direction)
-            for issue in issues:
-                self._issues[(owner, repo, issue.number)] = issue
-            self._neighbors[key] = [issue.number for issue in issues]
-        return self._neighbors[key]

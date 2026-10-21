@@ -26,7 +26,7 @@ import webview
 from dependency_listing import DependencyFilter, DependencyIssueLister
 from error_log import GENERIC_MESSAGE, log_unexpected_error
 from filename_utils import build_download_filename
-from github_client import GitHubAuthError, GitHubClient, GitHubApiError
+from github_client import GitHubAuthError, GitHubClient, GitHubApiError, Issue
 from settings_store import SettingsStore
 from token_store import delete_token, load_token, mask_token, save_token
 from upload_queue import (
@@ -37,6 +37,9 @@ from upload_queue import (
     scan_paths_for_markdown,
 )
 from url_parser import InvalidRepoUrlError, parse_repo_url
+
+
+ISSUES_PER_PAGE = 10
 
 
 class OperationInProgressError(RuntimeError):
@@ -85,8 +88,8 @@ class Api(metaclass=_AutoWrapErrorsMeta):
         self._operation_lock = threading.Lock()
         self._operation_in_progress = False
         self._issues_page_cache: dict[tuple, list] = {}
-        self._dependency_lister: DependencyIssueLister | None = None
-        self._dependency_lister_client: GitHubClient | None = None
+        # Кэш зависимостей вместе с клиентом, под которым он наполнен (см. _dependency_lister_for).
+        self._dependency_cache: tuple[GitHubClient, DependencyIssueLister] | None = None
         self._cancel_flags: dict[str, bool] = {}
 
         token = self._safe_load_token()
@@ -107,6 +110,13 @@ class Api(metaclass=_AutoWrapErrorsMeta):
         if self._client is None:
             raise GitHubAuthError("Токен GitHub не задан. Откройте настройки и введите токен.")
         return self._client
+
+    def _require_repo(self) -> tuple[str, str]:
+        """(owner, repo) выбранного репозитория."""
+        if not self._current_repo:
+            raise ValueError("Репозиторий не выбран")
+        owner, _, repo = self._current_repo.partition("/")
+        return owner, repo
 
     def _emit(self, event: str, payload: dict) -> None:
         window = webview.windows[0] if webview.windows else None
@@ -215,22 +225,20 @@ class Api(metaclass=_AutoWrapErrorsMeta):
         (Dependency filter.md); пересекаются между собой и применяются вместе с
         остальными параметрами."""
         client = self._require_client()
-        if not self._current_repo:
-            raise ValueError("Репозиторий не выбран")
-        owner, _, repo = self._current_repo.partition("/")
+        owner, repo = self._require_repo()
 
         if dependency_filters:
             issues = self._dependency_lister_for(client).list(
                 owner,
                 repo,
-                [DependencyFilter(mode=f["mode"], number=int(f["number"])) for f in dependency_filters],
+                _parse_dependency_filters(dependency_filters),
                 state=state,
                 labels=labels,
                 sort=sort,
                 direction=direction,
                 search=search,
                 page=page,
-                per_page=10,
+                per_page=ISSUES_PER_PAGE,
             )
             return {"issues": [_issue_to_dict(i) for i in issues]}
 
@@ -239,10 +247,19 @@ class Api(metaclass=_AutoWrapErrorsMeta):
             issues = self._issues_page_cache[cache_key]
         else:
             if search:
-                issues = client.search_issues_by_title(owner, repo, search, state=state, page=page, per_page=10)
+                issues = client.search_issues_by_title(
+                    owner, repo, search, state=state, page=page, per_page=ISSUES_PER_PAGE
+                )
             else:
                 issues = client.list_issues(
-                    owner, repo, state=state, labels=labels, sort=sort, direction=direction, page=page, per_page=10
+                    owner,
+                    repo,
+                    state=state,
+                    labels=labels,
+                    sort=sort,
+                    direction=direction,
+                    page=page,
+                    per_page=ISSUES_PER_PAGE,
                 )
             self._issues_page_cache[cache_key] = issues
 
@@ -253,24 +270,13 @@ class Api(metaclass=_AutoWrapErrorsMeta):
         состояния), чей title соответствует `query`; pull requests не
         предлагаются."""
         client = self._require_client()
-        if not self._current_repo:
-            raise ValueError("Репозиторий не выбран")
-        owner, _, repo = self._current_repo.partition("/")
-        if query.strip():
-            issues = client.search_issues_by_title(owner, repo, query.strip(), state="all", per_page=10)
+        owner, repo = self._require_repo()
+        title = query.strip()
+        if title:
+            issues = client.search_issues_by_title(owner, repo, title, state="all", per_page=ISSUES_PER_PAGE)
         else:
-            issues = client.list_issues(owner, repo, state="all", per_page=10)
-        return [
-            {
-                "number": i.number,
-                "title": i.title,
-                "state": i.state,
-                "dependencies_count": i.dependencies_count,
-                "dependents_count": i.dependents_count,
-            }
-            for i in issues
-            if not i.is_pull_request
-        ]
+            issues = client.list_issues(owner, repo, state="all", per_page=ISSUES_PER_PAGE)
+        return [_issue_to_suggestion(i) for i in issues if not i.is_pull_request]
 
     def refresh_issues_cache(self) -> None:
         self._invalidate_issues_cache()
@@ -281,17 +287,16 @@ class Api(metaclass=_AutoWrapErrorsMeta):
         ручной refresh, успешная отправка upload'а и т.д.), и уведомляет
         фронтенд, чтобы открытые экраны могли перезагрузить список сами."""
         self._issues_page_cache.clear()
-        if self._dependency_lister is not None:
-            self._dependency_lister.invalidate()
+        if self._dependency_cache is not None:
+            self._dependency_cache[1].invalidate()
         self._emit("issues-changed", {})
 
     def _dependency_lister_for(self, client: GitHubClient) -> DependencyIssueLister:
         """Кэш зависимостей привязан к клиенту: после смены токена он не
         должен отдавать данные, полученные под другой учётной записью."""
-        if self._dependency_lister is None or self._dependency_lister_client is not client:
-            self._dependency_lister = DependencyIssueLister(client)
-            self._dependency_lister_client = client
-        return self._dependency_lister
+        if self._dependency_cache is None or self._dependency_cache[0] is not client:
+            self._dependency_cache = (client, DependencyIssueLister(client))
+        return self._dependency_cache[1]
 
     # -- Раздел 5: Download - сохранение файлов ------------------------------
 
@@ -572,8 +577,23 @@ class Api(metaclass=_AutoWrapErrorsMeta):
         self._settings.update(download_default_folder=folder)
 
 
-def _issue_to_dict(issue) -> dict:
+def _issue_to_dict(issue: Issue) -> dict:
     return {**asdict(issue), "labels": [asdict(l) for l in issue.labels]}
+
+
+def _issue_to_suggestion(issue: Issue) -> dict:
+    """Карточка автодополнения фильтра зависимостей."""
+    return {
+        "number": issue.number,
+        "title": issue.title,
+        "state": issue.state,
+        "dependencies_count": issue.dependencies_count,
+        "dependents_count": issue.dependents_count,
+    }
+
+
+def _parse_dependency_filters(raw: list[dict]) -> list[DependencyFilter]:
+    return [DependencyFilter(mode=f["mode"], number=int(f["number"])) for f in raw]
 
 
 def _item_to_dict(item: UploadItem) -> dict:

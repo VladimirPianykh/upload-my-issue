@@ -46,6 +46,12 @@ def collect_closure(start: int, mode: str, get_neighbors: NeighborsFetcher) -> s
     return result
 
 
+def _describe_cycle(path: list[int], repeated: int) -> str:
+    """Текст ошибки: часть текущего пути, замкнувшаяся на `repeated`."""
+    cycle = [*path[path.index(repeated):], repeated]
+    return "Обнаружен цикл зависимостей: " + " -> ".join(map(str, cycle))
+
+
 def _reachable(start: int, direction: str, get_neighbors: NeighborsFetcher) -> set[int]:
     """Итеративный DFS с отслеживанием текущего пути: возврат на узел пути -
     цикл (раздел 5: обнаруживается через assert). Повторный заход в уже
@@ -57,10 +63,7 @@ def _reachable(start: int, direction: str, get_neighbors: NeighborsFetcher) -> s
     stack = [iter(get_neighbors(start, direction))]
     while stack:
         for neighbor in stack[-1]:
-            assert neighbor not in on_path, (
-                "Обнаружен цикл зависимостей: "
-                + " -> ".join(map(str, [*path[path.index(neighbor):], neighbor]))
-            )
+            assert neighbor not in on_path, _describe_cycle(path, neighbor)
             if neighbor in finished:
                 continue
             path.append(neighbor)
