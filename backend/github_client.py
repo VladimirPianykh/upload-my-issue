@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from dependency_graph import BLOCKED_BY, BLOCKING
+from dependency_graph import BLOCKED_BY, BLOCKING, RELATES
 
 API_ROOT = "https://api.github.com"
 _TIMEOUT = 30
@@ -28,6 +28,13 @@ _TIMEOUT = 30
 SUPPORTED_SORT_FIELDS = ("created", "updated", "comments")
 SUPPORTED_DIRECTIONS = ("asc", "desc")
 SUPPORTED_STATES = ("open", "closed", "all")
+
+# Направление связи (dependency_graph) -> путь эндпоинта относительно issue.
+_LINK_PATHS = {
+    BLOCKED_BY: "dependencies/blocked_by",
+    BLOCKING: "dependencies/blocking",
+    RELATES: "relates_to",
+}
 
 
 class GitHubApiError(RuntimeError):
@@ -233,28 +240,33 @@ class GitHubClient:
     # -- Dependency filter: зависимости issue -----------------------------------
 
     def list_issue_dependencies(self, owner: str, repo: str, number: int, direction: str) -> list[Issue]:
-        """Прямые зависимости issue одного репозитория (все страницы).
+        """Прямые связи issue одного репозитория (все страницы).
 
         direction: BLOCKED_BY - issues, от которых зависит `number`;
-        BLOCKING - issues, которые зависят от `number`. Issues других
-        репозиториев в результат не попадают (спецификация их игнорирует).
+        BLOCKING - issues, которые зависят от `number`; RELATES - связанные
+        через «relates to». Issues других репозиториев в результат не попадают
+        (спецификация их игнорирует). Каждый issue возвращается один раз, в
+        порядке первого появления: список может измениться между запросами
+        страниц, и тогда issue приходит на границе страниц дважды.
         """
-        if direction not in (BLOCKED_BY, BLOCKING):
+        if direction not in _LINK_PATHS:
             raise ValueError(f"Unsupported dependency direction: {direction}")
-        issues: list[Issue] = []
+        issues: dict[int, Issue] = {}
         page = 1
         while True:
             resp = self._request(
                 "GET",
-                f"/repos/{owner}/{repo}/issues/{number}/dependencies/{direction}",
+                f"/repos/{owner}/{repo}/issues/{number}/{_LINK_PATHS[direction]}",
                 params={"per_page": 100, "page": page},
             )
             batch = resp.json()
-            issues.extend(_issue_from_json(i) for i in batch if _belongs_to_repo(i, owner, repo))
+            for data in batch:
+                if _belongs_to_repo(data, owner, repo) and data["number"] not in issues:
+                    issues[data["number"]] = _issue_from_json(data)
             if len(batch) < 100:
                 break
             page += 1
-        return issues
+        return list(issues.values())
 
     # -- Раздел 9/10: создание Issue -------------------------------------------
 

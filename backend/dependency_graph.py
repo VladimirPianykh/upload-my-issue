@@ -4,9 +4,12 @@
 Модуль чистый: сам граф недоступен напрямую, его рёбра запрашиваются через
 функцию `get_neighbors(number, direction)` - это граница с GitHub API.
 
-Терминология GitHub (issue dependencies):
+Терминология GitHub - направления связей (то, что запрашивается у API):
 - BLOCKED_BY: issues, от которых зависит данный (его «зависимости»);
-- BLOCKING: issues, которые зависят от данного (его «зависимые»).
+- BLOCKING: issues, которые зависят от данного (его «зависимые»);
+- RELATES: связь «relates to». В отличие от двух предыдущих она симметрична
+  (видна с обеих сторон), поэтому «циклы» в ней - норма: проверка циклов к ней
+  не применяется, обход - обычная компонента связности.
 """
 from __future__ import annotations
 
@@ -14,17 +17,21 @@ from collections.abc import Callable, Iterable
 
 BLOCKED_BY = "blocked_by"
 BLOCKING = "blocking"
+RELATES = "relates"
 
-# Режимы фильтра (Dependency filter.md: `Зависимости`, `Зависимые`, `Связанные`).
+# Режимы фильтра: !dep#, !idep#, !rel# (relates to) и !con# (любая из трёх связей).
 DEPENDENCIES = "dependencies"
 DEPENDENTS = "dependents"
-RELATED = "related"
+RELATES_TO = "relates_to"
+CONNECTED = "connected"
 
 _DIRECTIONS_BY_MODE = {
     DEPENDENCIES: (BLOCKED_BY,),
     DEPENDENTS: (BLOCKING,),
-    RELATED: (BLOCKED_BY, BLOCKING),
+    RELATES_TO: (RELATES,),
+    CONNECTED: (BLOCKED_BY, BLOCKING, RELATES),
 }
+_SYMMETRIC_DIRECTIONS = frozenset({RELATES})
 
 NeighborsFetcher = Callable[[int, str], Iterable[int]]
 
@@ -33,15 +40,18 @@ def collect_closure(start: int, mode: str, get_neighbors: NeighborsFetcher) -> s
     """Номера всех issues, достижимых от `start` по зависимостям в режиме
     `mode`, без самого `start`.
 
-    Pre: `mode` - одно из DEPENDENCIES/DEPENDENTS/RELATED.
-    Post: результат не содержит `start`, каждый номер встречается один раз.
+    Pre: `mode` - одно из DEPENDENCIES/DEPENDENTS/RELATES_TO/CONNECTED.
+    Post: результат не содержит `start`, каждый номер встречается один раз
+    (в том числе если он достижим несколькими путями или разными связями).
+    Цикл среди направленных связей (BLOCKED_BY, BLOCKING) - AssertionError.
     """
     if mode not in _DIRECTIONS_BY_MODE:
         raise ValueError(f"Unsupported dependency filter mode: {mode}")
 
     result: set[int] = set()
     for direction in _DIRECTIONS_BY_MODE[mode]:
-        result |= _reachable(start, direction, get_neighbors)
+        walk = _component if direction in _SYMMETRIC_DIRECTIONS else _reachable
+        result |= walk(start, direction, get_neighbors)
     result.discard(start)
     return result
 
@@ -50,6 +60,19 @@ def _describe_cycle(path: list[int], repeated: int) -> str:
     """Текст ошибки: часть текущего пути, замкнувшаяся на `repeated`."""
     cycle = [*path[path.index(repeated):], repeated]
     return "Обнаружен цикл зависимостей: " + " -> ".join(map(str, cycle))
+
+
+def _component(start: int, direction: str, get_neighbors: NeighborsFetcher) -> set[int]:
+    """Компонента связности по симметричной связи (включая `start`): множество
+    посещённых исключает повторные запросы узлов и повторы соседей."""
+    seen = {start}
+    pending = [start]
+    while pending:
+        for neighbor in get_neighbors(pending.pop(), direction):
+            if neighbor not in seen:
+                seen.add(neighbor)
+                pending.append(neighbor)
+    return seen
 
 
 def _reachable(start: int, direction: str, get_neighbors: NeighborsFetcher) -> set[int]:

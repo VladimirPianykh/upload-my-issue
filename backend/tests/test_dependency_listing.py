@@ -5,7 +5,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
 
-from dependency_graph import BLOCKED_BY, BLOCKING, DEPENDENCIES, DEPENDENTS, RELATED
+from dependency_graph import (
+    BLOCKED_BY,
+    BLOCKING,
+    CONNECTED,
+    DEPENDENCIES,
+    DEPENDENTS,
+    RELATES,
+    RELATES_TO,
+)
 from dependency_listing import DependencyCycleError, DependencyFilter, DependencyIssueLister
 from github_client import Issue, Label
 
@@ -27,29 +35,35 @@ def make_issue(number, *, state="open", labels=(), title=None, comments=0, day=N
 
 
 class FakeGitHub:
-    """Фейк GitHub dependencies API. `depends_on[a] = [b]`: a зависит от b."""
+    """Фейк GitHub dependencies API. `depends_on[a] = [b]`: a зависит от b.
+    `relates[a] = [b]`: связь relates to, симметричная, как на GitHub."""
 
-    def __init__(self, issues, depends_on):
+    def __init__(self, issues, depends_on, relates=None):
         self.issues = {i.number: i for i in issues}
         self.depends_on = depends_on
+        self.relates = relates or {}
         self.calls = []
 
     def list_issue_dependencies(self, owner, repo, number, direction):
         self.calls.append((owner, repo, number, direction))
         if direction == BLOCKED_BY:
             numbers = self.depends_on.get(number, [])
-        else:
-            assert direction == BLOCKING
+        elif direction == BLOCKING:
             numbers = [n for n, deps in self.depends_on.items() if number in deps]
+        else:
+            assert direction == RELATES
+            numbers = list(self.relates.get(number, [])) + [
+                n for n, linked in self.relates.items() if number in linked
+            ]
         return [self.issues[n] for n in numbers]
 
 
 CHAIN = {4: [3], 3: [2], 2: [1]}  # 4 -> 3 -> 2 -> 1
 
 
-def listing(depends_on=CHAIN, issues=None, filters=(), **query):
+def listing(depends_on=CHAIN, issues=None, filters=(), relates=None, **query):
     issues = issues or [make_issue(n) for n in range(1, 6)]
-    github = FakeGitHub(issues, depends_on)
+    github = FakeGitHub(issues, depends_on, relates)
     lister = DependencyIssueLister(github)
     params = dict(state="all", labels=None, sort="created", direction="desc", search=None, page=1, per_page=10)
     params.update(query)
@@ -71,8 +85,34 @@ def test_dependents_filter_lists_transitive_followers():
     assert listing(filters=[dep(DEPENDENTS, 2)]) == [4, 3]
 
 
-def test_related_filter_lists_both_sides_without_the_selected_issue():
-    assert listing(filters=[dep(RELATED, 3)]) == [4, 2, 1]
+def test_connected_filter_lists_dependencies_and_dependents_without_the_selected_issue():
+    assert listing(filters=[dep(CONNECTED, 3)]) == [4, 2, 1]
+
+
+def test_relates_to_filter_lists_the_whole_chain_of_relates_to_links():
+    relates = {1: [2], 2: [3], 5: [4]}  # две независимые цепочки: 1-2-3 и 5-4
+    assert listing(depends_on={}, relates=relates, filters=[dep(RELATES_TO, 2)]) == [3, 1]
+
+
+def test_connected_filter_adds_relates_to_links_to_both_kinds_of_dependencies():
+    relates = {3: [5]}
+    assert listing(relates=relates, filters=[dep(CONNECTED, 3)]) == [5, 4, 2, 1]
+
+
+def test_issue_reachable_by_dependency_and_relates_to_is_listed_once():
+    relates = {3: [2, 1]}  # 2 и 1 уже достижимы как зависимости 3
+    assert listing(relates=relates, filters=[dep(CONNECTED, 3)]) == [4, 2, 1]
+
+
+def test_relates_to_filter_never_lists_the_selected_issue_even_with_a_cycle():
+    relates = {1: [2], 2: [3], 3: [1]}
+    assert listing(depends_on={}, relates=relates, filters=[dep(RELATES_TO, 1)]) == [3, 2]
+
+
+def test_relates_to_filter_is_intersected_with_a_dependency_filter():
+    relates = {4: [1, 5]}
+    # relates to 4: {1, 5}; зависимости 4 по цепочке: {3, 2, 1} -> пересечение {1}
+    assert listing(relates=relates, filters=[dep(RELATES_TO, 4), dep(DEPENDENCIES, 4)]) == [1]
 
 
 def test_several_filters_are_intersected():
@@ -90,7 +130,7 @@ def test_disjoint_filters_give_empty_result_not_an_error():
 
 
 def test_no_links_gives_empty_result():
-    assert listing(depends_on={}, filters=[dep(RELATED, 3)]) == []
+    assert listing(depends_on={}, filters=[dep(CONNECTED, 3)]) == []
 
 
 def test_at_least_one_filter_is_required():

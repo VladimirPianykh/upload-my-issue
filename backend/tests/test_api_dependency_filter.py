@@ -1,6 +1,6 @@
 import pytest
 
-from dependency_graph import BLOCKED_BY, BLOCKING, DEPENDENCIES, DEPENDENTS, RELATED
+from dependency_graph import BLOCKED_BY, BLOCKING, CONNECTED, DEPENDENCIES, DEPENDENTS, RELATES, RELATES_TO
 from error_log import GENERIC_MESSAGE
 from github_client import Issue, Label
 
@@ -24,9 +24,10 @@ def make_issue(number, *, state="open", title=None, deps=0, dependents=0, pr=Fal
 class FakeGitHub:
     """Фейк GitHubClient: единственная замоканная граница - сеть GitHub."""
 
-    def __init__(self, issues, depends_on):
+    def __init__(self, issues, depends_on, relates=None):
         self.issues = {i.number: i for i in issues}
         self.depends_on = depends_on
+        self.relates = relates or {}
         self.dependency_calls = 0
         self.listed = []
         self.searched = []
@@ -35,9 +36,13 @@ class FakeGitHub:
         self.dependency_calls += 1
         if direction == BLOCKED_BY:
             numbers = self.depends_on.get(number, [])
-        else:
-            assert direction == BLOCKING
+        elif direction == BLOCKING:
             numbers = [n for n, deps in self.depends_on.items() if number in deps]
+        else:
+            assert direction == RELATES
+            numbers = list(self.relates.get(number, [])) + [
+                n for n, linked in self.relates.items() if number in linked
+            ]
         return [self.issues[n] for n in numbers]
 
     def list_issues(self, owner, repo, **kwargs):
@@ -51,11 +56,11 @@ class FakeGitHub:
 
 @pytest.fixture
 def make_api(isolated_appdata):
-    def factory(issues, depends_on):
+    def factory(issues, depends_on, relates=None):
         from api import Api
 
         api = Api()
-        api._client = FakeGitHub(issues, depends_on)
+        api._client = FakeGitHub(issues, depends_on, relates)
         api._current_repo = "octo/hello"
         return api
 
@@ -94,7 +99,7 @@ def test_list_issues_intersects_several_dependency_filters(make_api):
 
 def test_result_carries_dependency_counts_for_cards(make_api):
     api = make_api(ISSUES, CHAIN)
-    issue = api.list_issues(dependency_filters=[{"mode": RELATED, "number": 3}], state="all")["issues"][0]
+    issue = api.list_issues(dependency_filters=[{"mode": CONNECTED, "number": 3}], state="all")["issues"][0]
     assert (issue["dependencies_count"], issue["dependents_count"]) == (1, 2)
 
 
@@ -115,7 +120,13 @@ def test_empty_dependency_filter_list_means_no_dependency_filtering(make_api):
 
 def test_no_results_is_an_empty_list_not_an_error(make_api):
     api = make_api(ISSUES, {})
-    assert api.list_issues(dependency_filters=[{"mode": RELATED, "number": 3}], state="all") == {"issues": []}
+    assert api.list_issues(dependency_filters=[{"mode": CONNECTED, "number": 3}], state="all") == {"issues": []}
+
+
+def test_list_issues_supports_relates_to_and_connected_filters_without_duplicates(make_api):
+    api = make_api(ISSUES, CHAIN, relates={3: [5, 2]})  # 2 - и зависимость 3, и relates to
+    assert numbers(api.list_issues(dependency_filters=[{"mode": RELATES_TO, "number": 3}], state="all")) == [5, 2]
+    assert numbers(api.list_issues(dependency_filters=[{"mode": CONNECTED, "number": 3}], state="all")) == [5, 4, 2, 1]
 
 
 # -- ошибки (раздел 5) ---------------------------------------------------

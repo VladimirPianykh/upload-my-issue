@@ -29,7 +29,7 @@ class DependencyCycleError(RuntimeError):
 
 @dataclass(frozen=True)
 class DependencyFilter:
-    mode: str  # DEPENDENCIES | DEPENDENTS | RELATED из dependency_graph
+    mode: str  # DEPENDENCIES | DEPENDENTS | RELATES_TO | CONNECTED из dependency_graph
     number: int
 
 

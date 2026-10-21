@@ -67,7 +67,7 @@ beforeEach(() => {
 });
 
 describe("construct autocomplete", () => {
-  it("typing '!' offers all three constructs", async () => {
+  it("typing '!' offers every construct", async () => {
     const user = userEvent.setup();
     renderScreen();
     await user.type(searchBox(), "!");
@@ -76,6 +76,7 @@ describe("construct autocomplete", () => {
       expect.stringContaining("!dep#"),
       expect.stringContaining("!idep#"),
       expect.stringContaining("!rel#"),
+      expect.stringContaining("!con#"),
     ]);
   });
 
@@ -152,7 +153,8 @@ describe("selecting an issue", () => {
   it("each construct maps to its own mode", async () => {
     const user = userEvent.setup();
     renderScreen();
-    for (const [text, mode] of [["!idep#log", "dependents"], ["!rel#log", "related"]]) {
+    const cases = [["!idep#log", "dependents"], ["!rel#log", "relates_to"], ["!con#log", "connected"]];
+    for (const [text, mode] of cases) {
       await user.clear(searchBox());
       await user.type(searchBox(), text);
       await user.click(await within(popup()).findByRole("option", { name: /Login bug/ }));
@@ -170,7 +172,36 @@ describe("selecting an issue", () => {
     await waitFor(() =>
       expect(lastListCall().dependencyFilters).toEqual([
         { mode: "dependencies", number: 7 },
-        { mode: "related", number: 9 },
+        { mode: "relates_to", number: 9 },
+      ])
+    );
+  });
+
+  it("chips are labelled by what the filter does", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+    for (const text of ["!rel#a", "!con#b"]) {
+      await user.type(searchBox(), text);
+      await user.click(await within(popup()).findByRole("option", { name: /Login bug/ }));
+    }
+    const chips = within(screen.getByRole("list", { name: "Фильтры зависимостей" }));
+    expect(chips.getByText("Relates to")).toBeInTheDocument();
+    expect(chips.getByText("Любая связь")).toBeInTheDocument();
+  });
+
+  it("the same issue can be used by different filters, each exactly once", async () => {
+    const user = userEvent.setup();
+    renderScreen();
+    for (const text of ["!rel#a", "!con#a", "!rel#a"]) {
+      await user.type(searchBox(), text);
+      await user.click(await within(popup()).findByRole("option", { name: /Login bug/ }));
+    }
+    const chips = screen.getByRole("list", { name: "Фильтры зависимостей" });
+    expect(within(chips).getAllByRole("listitem")).toHaveLength(2);
+    await waitFor(() =>
+      expect(lastListCall().dependencyFilters).toEqual([
+        { mode: "relates_to", number: 7 },
+        { mode: "connected", number: 7 },
       ])
     );
   });

@@ -5,7 +5,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
 
-from dependency_graph import BLOCKED_BY, BLOCKING
+from dependency_graph import BLOCKED_BY, BLOCKING, RELATES
 from github_client import GitHubClient
 
 
@@ -74,6 +74,24 @@ def test_blocking_hits_the_blocking_endpoint(github):
     assert [i.number for i in issues] == [9]
 
 
+def test_relates_to_hits_its_own_endpoint_outside_of_dependencies(github):
+    github.responses = [[issue_json(5), issue_json(6)]]
+
+    issues = github.list_issue_dependencies("octo", "hello", 7, RELATES)
+
+    method, url, _ = github.requests[0]
+    assert (method, url) == ("GET", "https://api.github.com/repos/octo/hello/issues/7/relates_to")
+    assert [i.number for i in issues] == [5, 6]
+
+
+def test_issues_of_other_repositories_are_ignored_for_relates_to_too(github):
+    github.responses = [[issue_json(5), issue_json(6, repo="someone/else")]]
+
+    issues = github.list_issue_dependencies("octo", "hello", 7, RELATES)
+
+    assert [i.number for i in issues] == [5]
+
+
 def test_all_pages_are_read(github):
     github.responses = [[issue_json(n) for n in range(1, 101)], [issue_json(101)]]
 
@@ -81,6 +99,16 @@ def test_all_pages_are_read(github):
 
     assert len(issues) == 101
     assert [r[2]["page"] for r in github.requests] == [1, 2]
+
+
+def test_an_issue_repeated_on_page_boundaries_is_returned_once(github):
+    # список изменился между запросами страниц: issue 100 пришла дважды
+    first_page = [issue_json(n) for n in range(1, 101)]
+    github.responses = [first_page, [issue_json(100), issue_json(101)]]
+
+    issues = github.list_issue_dependencies("octo", "hello", 500, BLOCKED_BY)
+
+    assert [i.number for i in issues] == list(range(1, 102))
 
 
 def test_issues_of_other_repositories_are_ignored(github):

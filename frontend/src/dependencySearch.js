@@ -11,7 +11,8 @@
 export const DEPENDENCY_CONSTRUCTS = [
   { token: "!dep#", mode: "dependencies", label: "Зависимости" },
   { token: "!idep#", mode: "dependents", label: "Зависимые" },
-  { token: "!rel#", mode: "related", label: "Связанные" },
+  { token: "!rel#", mode: "relates_to", label: "Relates to" },
+  { token: "!con#", mode: "connected", label: "Любая связь" },
 ];
 
 const CONSTRUCT_TRIGGER = "!";

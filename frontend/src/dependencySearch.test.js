@@ -19,8 +19,16 @@ describe("constructs registry", () => {
     expect(modes).toEqual({
       "!dep#": "dependencies",
       "!idep#": "dependents",
-      "!rel#": "related",
+      "!rel#": "relates_to",
+      "!con#": "connected",
     });
+  });
+
+  it("has neither duplicate tokens, nor duplicate modes, nor duplicate labels", () => {
+    for (const key of ["token", "mode", "label"]) {
+      const values = DEPENDENCY_CONSTRUCTS.map((c) => c[key]);
+      expect(new Set(values).size).toBe(values.length);
+    }
   });
 });
 
@@ -28,12 +36,14 @@ describe("construct autocomplete (after typing '!')", () => {
   it("offers every construct right after '!'", () => {
     const c = ctx("fix !|");
     expect(c.kind).toBe("construct");
-    expect(c.options.map((o) => o.token)).toEqual(["!dep#", "!idep#", "!rel#"]);
+    expect(c.options.map((o) => o.token)).toEqual(["!dep#", "!idep#", "!rel#", "!con#"]);
   });
 
   it("narrows options by the typed prefix", () => {
     expect(ctx("!i|").options.map((o) => o.token)).toEqual(["!idep#"]);
     expect(ctx("!de|").options.map((o) => o.token)).toEqual(["!dep#"]);
+    expect(ctx("!c|").options.map((o) => o.token)).toEqual(["!con#"]);
+    expect(ctx("!r|").options.map((o) => o.token)).toEqual(["!rel#"]);
   });
 
   it("is closed when nothing matches or there is no '!'", () => {
@@ -70,7 +80,8 @@ describe("issue autocomplete (after a construct)", () => {
   it("opens inside and at the end of the word after '#'", () => {
     expect(ctx("!idep#lo|gin").query).toBe("login");
     expect(ctx("!idep#login|").query).toBe("login");
-    expect(ctx("!rel#login|").construct.mode).toBe("related");
+    expect(ctx("!rel#login|").construct.mode).toBe("relates_to");
+    expect(ctx("!con#login|").construct.mode).toBe("connected");
   });
 
   it("includes the position right before the first whitespace but not after it", () => {
